@@ -114,6 +114,7 @@ def test_loop(dataloader, model, loss_fn):
         for X, y in dataloader:
             pred = model(X)
             test_loss += loss_fn(pred, y).item()
+            print("input: " + str(X) + "    |    " + "pred: " + str(pred) + "    |    " + str("true: " + str(y)))
 
     test_loss /= num_batches
     print(f"Avg test loss: {test_loss:>8f} \n")

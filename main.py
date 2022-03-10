@@ -1,11 +1,12 @@
 import data_generation as data_gen
 import nn_helpers
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from functools import partial
-import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
 
 
 class RegFunc:
@@ -77,9 +78,10 @@ def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
     """
     # Generate a matrix of random regressor vectors and corresponding observations
     input_reg = data_gen.generate_regressor_mat(dim, num_obs)
-    obs = torch.tensor(data_gen.generate_data(input_reg, reg_func.eval), dtype=torch.float)
-    input_reg = torch.tensor(input_reg.T, dtype=torch.float)
-    train_dataset = GenDataset(input_reg, obs)
+    obs = data_gen.generate_data(input_reg, reg_func.eval)
+    tens_obs = torch.tensor(obs, dtype=torch.float)
+    tens_input_reg = torch.tensor(input_reg.T, dtype=torch.float)
+    train_dataset = GenDataset(tens_input_reg, tens_obs)
     if verbose:
         print("input_reg: ")
         print("  Shape of input_reg: " + str(train_dataset.reg_mat.size()))
@@ -98,9 +100,9 @@ def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
     for i in range(num_test):
         true_obs[i] += reg_func.eval(test_reg[:, i])
     # Convert test data to torch tensor and Dataset
-    test_reg = torch.from_numpy(test_reg.T).float()
-    true_obs = torch.from_numpy(true_obs).float()
-    test_dataset = GenDataset(test_reg, true_obs)
+    tens_test_reg = torch.from_numpy(test_reg.T).float()
+    tens_true_obs = torch.from_numpy(true_obs).float()
+    test_dataset = GenDataset(tens_test_reg, tens_true_obs)
     if verbose:
         print("test_reg: ")
         print("  Shape of test_reg: " + str(test_dataset.reg_mat.size()))
@@ -111,7 +113,7 @@ def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
         # print("  true_obs: " + str(train_dataset.obs))
         print("  Avg of observations: " + str(torch.mean(test_dataset.obs)))
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-    return train_dataloader, test_dataloader
+    return train_dataloader, test_dataloader, input_reg, obs, test_reg, true_obs
 
 
 def create_network(dim, num_obs, reg_func, c_inv, verbose):
@@ -208,23 +210,29 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
     :return: none
     """
     tot_loss = np.zeros(obs.size)
+    tot_loss_reg = np.zeros(obs.size)
     for index in range(obs.size):
         num_obs = obs[index]
         model = create_network(dim, num_obs, reg_func, c_inv, verbose)
         for rep in range(reps):
-            train_dataloader, test_dataloader = gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose)
+            train_dataloader, test_dataloader, x_train, y_train, x_test, y_test = gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose)
             tot_loss[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
+            reg = LinearRegression().fit(x_train.T, y_train)
+            reg_pred = reg.predict(x_test.T)
+            tot_loss_reg[index] += np.sum(np.power(y_test - reg_pred, 2))
         tot_loss[index] = tot_loss[index] / reps
+        tot_loss_reg[index] = tot_loss_reg[index] / reps
         print("------------------------------------------------------------------------------------------------------")
     # Plot the error across different sample sizes
     fig, ax = plt.subplots()
     ax.plot(obs, tot_loss, 'b')
+    ax.plot(obs, tot_loss_reg, 'r')
     ax.set(xlabel='Number of Observations', ylabel='Total Loss', title='Convergence of NN function estimate')
     ax.grid()
     plt.show()
 
 
-num_obs_arr = np.arange(500, 2000, step=200)
+num_obs_arr = np.arange(500, 2000, step=500)
 partial_func = partial(data_gen.constant_func, constant=100)
 func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
 main(num_obs_arr, reps=2, dim=1, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0, verbose=True)
