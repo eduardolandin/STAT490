@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
+from functools import partial
 import matplotlib.pyplot as plt
 
 
@@ -65,20 +66,15 @@ class GenDataset(Dataset):
         return self.reg_mat[idx, :], self.obs[idx]
 
 
-def main_helper(dim, num_obs, reg_func, c_inv, batch_size, num_test, learning_rate, weight_decay, verbose):
+def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
     """
-    :param dim: the dimension of the regression problem
-    :param num_obs: the number of observations to generate
+    :param dim: an integer, the dimension of the regression problem
+    :param num_obs: an integer, the number of observations to generate for the training set
     :param reg_func: a RegFunc object representing the underlying regression function and its properties
-    :param c_inv: a constant that regulates the width of the network
-    :param batch_size: number of samples in a batch
-    :param num_test: size of testing set
-    :param learning_rate: the learning rate of the model
-    :param weight_decay: the weight decay parameter
-    :param verbose:
-    :return:
+    :param batch_size: an integer, how many samples per batch to load
+    :param num_test: an integer, the size of the training set
+    :return: A dataloader for the train data set and a dataloader for the test set
     """
-
     # Generate a matrix of random regressor vectors and corresponding observations
     input_reg = data_gen.generate_regressor_mat(dim, num_obs)
     obs = torch.tensor(data_gen.generate_data(input_reg, reg_func.eval), dtype=torch.float)
@@ -115,7 +111,18 @@ def main_helper(dim, num_obs, reg_func, c_inv, batch_size, num_test, learning_ra
         # print("  true_obs: " + str(train_dataset.obs))
         print("  Avg of observations: " + str(torch.mean(test_dataset.obs)))
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    return train_dataloader, test_dataloader
 
+
+def create_network(dim, num_obs, reg_func, c_inv, verbose):
+    """
+    :param dim: an integer, the dimension of the regression problem
+    :param num_obs: an integer, the number of observations to generate for the training set
+    :param reg_func: a RegFunc object representing the underlying regression function and its properties
+    :param c_inv: a constant that regulates the width of the network
+    :param verbose: boolean, should information be printed to console?
+    :return:
+    """
     # Calculate the network parameters
     min_F, min_layers, min_nodes, s = nn_helpers.network_parameters(reg_func.beta, reg_func.t, reg_func.K, num_obs, c_inv)
     if verbose:
@@ -136,7 +143,24 @@ def main_helper(dim, num_obs, reg_func, c_inv, batch_size, num_test, learning_ra
     model = NeuralNetwork(nn_layers).to(device)
     if verbose:
         print(model)
+    return model
+
+
+def train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose):
+    """
+    :param model: a NeuralNetwork object
+    :param train_dataloader: a data loader to train the network
+    :param test_dataloader: a data loader to test the network
+    :param num_epochs: an integer, the number of epochs to train for
+    :param learning_rate: the learning rate of the model
+    :param weight_decay: the weight decay parameter
+    :param verbose:
+    :return: the average test error
+    """
+
     initial_params = torch.nn.utils.parameters_to_vector(model.parameters())
+    if verbose:
+        print("Initial network parameters: " + str(initial_params))
 
     # Loss function to evaluate model performance
     loss_func = nn.MSELoss()
@@ -146,50 +170,51 @@ def main_helper(dim, num_obs, reg_func, c_inv, batch_size, num_test, learning_ra
 
     # Train the model on the generated data
     model.train(True)
-    epochs = 20
-    for t in range(epochs):
+    for t in range(num_epochs):
         print(f"Epoch {t + 1}\n-------------------------------")
         nn_helpers.train_loop(dataloader=train_dataloader, model=model, loss_fn=loss_func, optimizer=optimizer_func)
-    print("Initial network parameters: " + str(initial_params))
-    print("Final network params = initial params: " + str(initial_params == torch.nn.utils.parameters_to_vector(model.parameters())))
-    print("Final network parameters: " + str(torch.nn.utils.parameters_to_vector(model.parameters())))
+    if verbose:
+        print("Final network params = initial params: " + str(initial_params == torch.nn.utils.parameters_to_vector(model.parameters())))
+        print("Final network parameters: " + str(torch.nn.utils.parameters_to_vector(model.parameters())))
 
     # number of non-zero parameters:
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-    params = sum([np.prod(p.size()) for p in model_parameters])
-    print("Number of parameters: " + str(params))
+    num_params = sum([np.prod(p.size()) for p in model_parameters])
     num_non_zero_params = torch.count_nonzero(torch.nn.utils.parameters_to_vector(model.parameters()))
-    print("Number of non-zero parameters: " + str(num_non_zero_params))
+    if verbose:
+        print("Number of parameters: " + str(num_params))
+        print("Number of non-zero parameters: " + str(num_non_zero_params))
 
     # Evaluate model performance on test data
     model.eval()
-    test_loss = 0
-    with torch.no_grad():
-        for index in range(test_reg.size(0)):
-            pred = model.forward(test_reg[index, :])
-            print("input: " + str(test_reg[index, :]) + "    |    " + "pred: " + str(pred))
-            test_loss += loss_func(pred, true_obs).item()
-    return test_loss / num_test
+    test_loss = nn_helpers.test_loop(test_dataloader, model, loss_func)
+    return test_loss
 
 
-def main(obs, dim, reg_func, c_inv, batch_size, num_test, learning_rate, weight_decay, verbose):
+def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, learning_rate, weight_decay, verbose):
     """
     Evaluating the model at different observations
-    :param obs: an array of observations
-    :param dim: the dimension of the regression problem
+    :param obs: an numpy array of observations
+    :param reps: an integer specifying how many times to train/test at a given observation
+    :param dim: an integer specifying the dimension of the regression problem
     :param reg_func: a RegFunc object representing the underlying regression function and its properties
-    :param c_inv: a constant that regulates the width of the network
-    :param batch_size: number of batches used in training
-    :param num_test: the number of tests to run
-    :param learning_rate: the learning rate
-    :param weight_decay: the weight decay regularization parameter
-    :param verbose:
+    :param c_inv: a float constant that regulates the width of the network
+    :param batch_size: an integer specifying how many samples per batch to load
+    :param num_epochs: how many training epochs to use
+    :param num_test: an integer specifying the size of the test set
+    :param learning_rate: a float specifying the learning rate
+    :param weight_decay: a float specifying the weight decay regularization parameter
+    :param verbose: boolean
     :return: none
     """
     tot_loss = np.zeros(obs.size)
     for index in range(obs.size):
         num_obs = obs[index]
-        tot_loss[index] = main_helper(dim, num_obs, reg_func, c_inv, batch_size, num_test, learning_rate, weight_decay, verbose)
+        model = create_network(dim, num_obs, reg_func, c_inv, verbose)
+        for rep in range(reps):
+            train_dataloader, test_dataloader = gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose)
+            tot_loss[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
+        tot_loss[index] = tot_loss[index] / reps
         print("------------------------------------------------------------------------------------------------------")
     # Plot the error across different sample sizes
     fig, ax = plt.subplots()
@@ -200,6 +225,8 @@ def main(obs, dim, reg_func, c_inv, batch_size, num_test, learning_rate, weight_
 
 
 num_obs_arr = np.arange(500, 2000, step=200)
-main(num_obs_arr, dim=1, batch_size=20, num_test=20, learning_rate=0.001, weight_decay=0, verbose=True)
+partial_func = partial(data_gen.constant_func, constant=100)
+func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
+main(num_obs_arr, reps=2, dim=1, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0, verbose=True)
 
 
