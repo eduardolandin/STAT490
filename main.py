@@ -209,6 +209,7 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
     :param verbose: boolean
     :return: none
     """
+    np.random.seed(2021)
     tot_loss = np.zeros(obs.size)
     tot_loss_reg = np.zeros(obs.size)
     for index in range(obs.size):
