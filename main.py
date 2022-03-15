@@ -3,10 +3,11 @@ import nn_helpers
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from autogluon.tabular import TabularDataset, TabularPredictor
 from functools import partial
 from sklearn.linear_model import LinearRegression
+from torch import nn
+from torch.utils.data import Dataset, DataLoader
 
 
 class RegFunc:
@@ -14,9 +15,9 @@ class RegFunc:
     A class that represents a regression function and its properties
 
     :param func: the underlying regression function to use
-    :param beta: the beta holder coefficients of the function
-    :param t:
-    :param K:
+    :param beta: a numpy array, the beta holder coefficients of the function
+    :param t: a numpy array,
+    :param K: a numpy array,
     """
 
     def __init__(self, func, beta, t, K):
@@ -67,15 +68,16 @@ class GenDataset(Dataset):
         return self.reg_mat[idx, :], self.obs[idx]
 
 
-def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
+def gen_train_data(dim, num_obs, reg_func, batch_size, verbose):
     """
     :param dim: an integer, the dimension of the regression problem
     :param num_obs: an integer, the number of observations to generate for the training set
-    :param reg_func: a RegFunc object representing the underlying regression function and its properties
+    :param reg_func: a RegFunc, the underlying regression function and its properties
     :param batch_size: an integer, how many samples per batch to load
-    :param num_test: an integer, the size of the training set
+    :param verbose: a boolean, enables print statements
     :return: A dataloader for the train data set and a dataloader for the test set
     """
+
     # Generate a matrix of random regressor vectors and corresponding observations
     input_reg = data_gen.generate_regressor_mat(dim, num_obs)
     obs = data_gen.generate_data(input_reg, reg_func.eval)
@@ -92,7 +94,18 @@ def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
         # print("  obs: " + str(train_dataset.obs))
         print("  Avg of observations: " + str(torch.mean(train_dataset.obs)))
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    return train_dataloader, input_reg, obs
 
+
+def gen_test_data(dim, reg_func, batch_size, num_test, verbose):
+    """
+    :param dim: an integer, the dimension of the regression problem
+    :param reg_func: a RegFunc, the underlying regression function and its properties
+    :param batch_size: an integer, how many samples per batch to load
+    :param num_test: an integer, the size of the training set
+    :param verbose: a boolean, enables print statements
+    :return: A dataloader for the train data set and a dataloader for the test set
+    """
     # Generate test data
     test_reg = data_gen.generate_regressor_mat(dim, num_test)
     # Generate true test data y values
@@ -112,16 +125,16 @@ def gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose):
         print("  Shape of true_obs: " + str(test_dataset.obs.size()))
         # print("  true_obs: " + str(train_dataset.obs))
         print("  Avg of observations: " + str(torch.mean(test_dataset.obs)))
-    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
-    return train_dataloader, test_dataloader, input_reg, obs, test_reg, true_obs
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    return test_dataloader, test_reg, true_obs
 
 
 def create_network(dim, num_obs, reg_func, c_inv, verbose):
     """
     :param dim: an integer, the dimension of the regression problem
     :param num_obs: an integer, the number of observations to generate for the training set
-    :param reg_func: a RegFunc object representing the underlying regression function and its properties
-    :param c_inv: a constant that regulates the width of the network
+    :param reg_func: a RegFunc, the underlying regression function and its properties
+    :param c_inv: a float, regulates the width of the network
     :param verbose: boolean, should information be printed to console?
     :return:
     """
@@ -150,13 +163,13 @@ def create_network(dim, num_obs, reg_func, c_inv, verbose):
 
 def train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose):
     """
-    :param model: a NeuralNetwork object
-    :param train_dataloader: a data loader to train the network
-    :param test_dataloader: a data loader to test the network
+    :param model: a NeuralNetwork object, the model used
+    :param train_dataloader: a Dataloader, the training set
+    :param test_dataloader: a Dataloader, the testing set
     :param num_epochs: an integer, the number of epochs to train for
-    :param learning_rate: the learning rate of the model
-    :param weight_decay: the weight decay parameter
-    :param verbose:
+    :param learning_rate: a float, the learning rate of the model
+    :param weight_decay: a float, the weight decay parameter
+    :param verbose: a boolean, enables print statements
     :return: the average test error
     """
 
@@ -195,37 +208,40 @@ def train_test_net(model, train_dataloader, test_dataloader, num_epochs, learnin
 
 def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, learning_rate, weight_decay, verbose):
     """
-    Evaluating the model at different observations
     :param obs: an numpy array of observations
-    :param reps: an integer specifying how many times to train/test at a given observation
-    :param dim: an integer specifying the dimension of the regression problem
-    :param reg_func: a RegFunc object representing the underlying regression function and its properties
-    :param c_inv: a float constant that regulates the width of the network
-    :param batch_size: an integer specifying how many samples per batch to load
-    :param num_epochs: how many training epochs to use
-    :param num_test: an integer specifying the size of the test set
-    :param learning_rate: a float specifying the learning rate
-    :param weight_decay: a float specifying the weight decay regularization parameter
-    :param verbose: boolean
+    :param reps: an integer, how many times to train/test at a given observation
+    :param dim: an integer, the dimension of the regression problem
+    :param reg_func: a RegFunc, the underlying regression function and its properties
+    :param c_inv: a float, regulates the width of the network
+    :param batch_size: an integer, how many samples per batch to load
+    :param num_epochs: an integer, how many training epochs to use
+    :param num_test: an integer, the size of the test set
+    :param learning_rate: a float, the learning rate
+    :param weight_decay: a float,  the weight decay regularization parameter
+    :param verbose: boolean, enables print statements
     :return: none
     """
-    np.random.seed(2021)
+
+    np.random.seed(2022)
     tot_loss = np.zeros(obs.size)
     tot_loss_reg = np.zeros(obs.size)
     for index in range(obs.size):
         num_obs = obs[index]
         model = create_network(dim, num_obs, reg_func, c_inv, verbose)
         for rep in range(reps):
-            train_dataloader, test_dataloader, x_train, y_train, x_test, y_test = gen_data(dim, num_obs, reg_func, batch_size, num_test, verbose)
+            train_dataloader, x_train, y_train = gen_train_data(dim, num_obs, reg_func, batch_size, verbose)
+            test_dataloader, x_test, y_test = gen_test_data(dim, reg_func, 1, num_test, verbose)
             tot_loss[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
             reg = LinearRegression().fit(x_train.T, y_train)
             reg_pred = reg.predict(x_test.T)
-            print(reg.coef_)
-            print(reg.intercept_)
+            if verbose:
+                print(reg.coef_)
+                print(reg.intercept_)
             tot_loss_reg[index] += np.sum(np.power(y_test - reg_pred, 2))
         tot_loss[index] = tot_loss[index] / reps
         tot_loss_reg[index] = tot_loss_reg[index] / reps
-        print("------------------------------------------------------------------------------------------------------")
+        if verbose:
+            print("--------------------------------------------------------------------------------------------------")
     # Plot the error across different sample sizes
     fig, ax = plt.subplots()
     l1, = ax.plot(obs, tot_loss, 'b')
