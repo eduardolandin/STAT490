@@ -2,6 +2,7 @@ import data_generation as data_gen
 import nn_helpers
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 from autogluon.tabular import TabularDataset, TabularPredictor
 from functools import partial
@@ -225,19 +226,34 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
     np.random.seed(2022)
     tot_loss = np.zeros(obs.size)
     tot_loss_reg = np.zeros(obs.size)
+    tot_loss_ag = np.zeros(obs.size)
     for index in range(obs.size):
         num_obs = obs[index]
         model = create_network(dim, num_obs, reg_func, c_inv, verbose)
         for rep in range(reps):
             train_dataloader, x_train, y_train = gen_train_data(dim, num_obs, reg_func, batch_size, verbose)
             test_dataloader, x_test, y_test = gen_test_data(dim, reg_func, 1, num_test, verbose)
+            pd_train = pd.DataFrame(np.concatenate(x_train.T, y_train))
+            pd_test = pd.DataFrame(x_test.T)
+
+            # NN
             tot_loss[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
+
+            # regression
             reg = LinearRegression().fit(x_train.T, y_train)
             reg_pred = reg.predict(x_test.T)
             if verbose:
                 print(reg.coef_)
                 print(reg.intercept_)
             tot_loss_reg[index] += np.sum(np.power(y_test - reg_pred, 2))
+
+            # autogluon
+            path = "agModels-predictClass"
+            train_data = TabularDataset(pd_train)
+            predictor = TabularPredictor(label=train_data.columns[len(train_data.columns)], path=path).fit(train_data)
+            y_pred = predictor.predict(pd_test)
+            perf = predictor.evaluate_predictions(y_true=y_test, y_pred=y_pred, auxiliary_metrics=True)
+
         tot_loss[index] = tot_loss[index] / reps
         tot_loss_reg[index] = tot_loss_reg[index] / reps
         if verbose:
