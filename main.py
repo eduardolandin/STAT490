@@ -282,8 +282,10 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
 num_obs_arr = np.arange(300, 3000, step=300)
 dim_prob = 2
 # partial_func = partial(data_gen.constant_func, constant=100)
-partial_func = partial(data_gen.linear_func, weights=np.ones(dim_prob), intercept=10)
+# partial_func = partial(data_gen.linear_func, weights=np.ones(dim_prob), intercept=10)
+# partial_func = partial(data_gen.linear_func, weights=np.full(dim_prob, [10, -20]), intercept=0)
+partial_func = partial(data_gen.x_square, weights=np.full(dim_prob, [2, -20]), scale=1, intercept=0)
 func = RegFunc(partial_func, beta=np.ones(dim_prob), t=np.ones(dim_prob), K=1)
-main(num_obs_arr, reps=2, dim=dim_prob, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0, verbose=True)
+main(num_obs_arr, reps=2, dim=dim_prob, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0.0001, verbose=True)
 
 
