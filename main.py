@@ -224,7 +224,7 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
     """
 
     np.random.seed(2022)
-    tot_loss = np.zeros(obs.size)
+    tot_loss_nn = np.zeros(obs.size)
     tot_loss_reg = np.zeros(obs.size)
     tot_loss_ag = np.zeros(obs.size)
     for index in range(obs.size):
@@ -233,11 +233,12 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
         for rep in range(reps):
             train_dataloader, x_train, y_train = gen_train_data(dim, num_obs, reg_func, batch_size, verbose)
             test_dataloader, x_test, y_test = gen_test_data(dim, reg_func, 1, num_test, verbose)
-            pd_train = pd.DataFrame(np.concatenate(x_train.T, y_train))
+            pd_train = pd.DataFrame(np.concatenate((x_train.T, y_train), axis=1))
+            #print(pd_train)
             pd_test = pd.DataFrame(x_test.T)
 
             # NN
-            tot_loss[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
+            tot_loss_nn[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
 
             # regression
             reg = LinearRegression().fit(x_train.T, y_train)
@@ -245,25 +246,35 @@ def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, lear
             if verbose:
                 print(reg.coef_)
                 print(reg.intercept_)
-            tot_loss_reg[index] += np.sum(np.power(y_test - reg_pred, 2))
+            reg_loss = np.sum(np.power(y_test - reg_pred, 2)) / num_test
+            print("reg_loss: " + str(reg_loss))
+            tot_loss_reg[index] += reg_loss
 
             # autogluon
             path = "agModels-predictClass"
             train_data = TabularDataset(pd_train)
-            predictor = TabularPredictor(label=train_data.columns[len(train_data.columns)], path=path).fit(train_data)
-            y_pred = predictor.predict(pd_test)
-            perf = predictor.evaluate_predictions(y_true=y_test, y_pred=y_pred, auxiliary_metrics=True)
+            predictor = TabularPredictor(label=train_data.columns[len(train_data.columns)-1], path=path).fit(train_data)
+            y_pred = predictor.predict(pd_test, as_pandas=False)
+            ag_loss = np.sum(np.power(y_test - y_pred, 2)) / num_test
+            print("ag_loss: " + str(ag_loss))
+            tot_loss_ag[index] += ag_loss
 
-        tot_loss[index] = tot_loss[index] / reps
+        tot_loss_nn[index] = tot_loss_nn[index] / reps
         tot_loss_reg[index] = tot_loss_reg[index] / reps
+        tot_loss_ag[index] = tot_loss_ag[index] / reps
         if verbose:
             print("--------------------------------------------------------------------------------------------------")
+    print("tot_loss_nn: " + str(tot_loss_nn))
+    print("tot_loss_reg: " + str(tot_loss_reg))
+    print("tot_loss_ag: " + str(tot_loss_ag))
+
     # Plot the error across different sample sizes
     fig, ax = plt.subplots()
-    l1, = ax.plot(obs, tot_loss, 'b')
+    l1, = ax.plot(obs, tot_loss_nn, 'b')
     l2, = ax.plot(obs, tot_loss_reg, 'r')
+    l3, = ax.plot(obs, tot_loss_ag, 'k')
     ax.set(xlabel='Number of Observations', ylabel='Total Loss', title='Convergence of NN function estimate')
-    ax.legend([l1, l2], ['NN loss', 'Regression loss'])
+    ax.legend([l1, l2, l3], ['NN loss', 'Regression loss', "AG Loss"])
     ax.grid()
     plt.show()
 
