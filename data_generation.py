@@ -32,16 +32,17 @@ def x_square(input_vector, weights, scale, intercept):
     return np.power(linear_comb, 2)
 
 
-def sinusoidal(input_vector, amp, ang_freq, x_off, y_off):
+def sinusoidal(input_vector, weights, amp, ang_freq, x_off, y_off):
     """
     :param input_vector: a numpy vector in [0, 1]^d
+    :param weights:
     :param amp:
     :param ang_freq:
     :param x_off:
     :param y_off:
     :return: a sinusoidal function of the sum of the input vector
     """
-    input_sum = np.sum(input_vector)
+    input_sum = np.sum(np.multiply(input_vector, weights))
     return (amp * np.sin((ang_freq * input_sum) - x_off)) + y_off
 
 
