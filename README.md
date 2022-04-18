@@ -5,5 +5,9 @@ The goal of this project is to compare the empirical convergence rates of neural
 ## Overview
 
 - `data_generation` implements regression functions and generates simulated data
-- `main` performs experiments using `data generation` and `nn_helpers`
-- `nn_helpers` neural network implementation
+- `main` performs experiments using `data generation` and a reconfigured version of `SH_Code`
+
+## Legacy Code
+- `nn_helpers` old neural network implementation
+- `SH_Code` example code from https://arxiv.org/abs/1804.02253
+- `legacy_pytorch_code` numerical experiments code with PyTorch implementation
