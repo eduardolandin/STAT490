@@ -112,7 +112,7 @@ def keras_model_test_train(x_train, y_train, x_test, y_test):
         # plt.title('${DNN}$')
         # plt.show()
         print("----------------------------------------- END OF ITER -----------------------------------------")
-        if msemse[iter_num] < 50:  # <0.000002 to reproduce simulations from paper
+        if msemse[iter_num] < 10:  # <0.000002 to reproduce simulations from paper
             iter_num = max_while
         iter_num = iter_num + 1
     train_mse = min(msemse) / num_obs
@@ -123,7 +123,7 @@ def keras_model_test_train(x_train, y_train, x_test, y_test):
     return train_mse, test_mse
 
 
-def main(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
+def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
     """
     Runs the NN vs. the world experiments at different number of observationsa and plots the results
 
@@ -219,6 +219,104 @@ def main(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
     ax.grid()
     plt.show()
 
+def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
+    """
+    Runs the NN vs. the world experiments at different number of observationsa and plots the results
+
+    :param dim: an int, the dimension of the regression problemx
+    :param obs: an int, the number of observations to use in the training set
+    :param reps: an int, how many reps per each number of observation
+    :param num_test: an int, the size of the testing set
+    :param reg_func: a RegFunc object, the underlying regression function
+    :param sd_noise_arr: an array containing the SD of the noise term that is added to the training observations in each iter
+    :param verbose: a boolean, controls print statements
+    :return: none
+    """
+
+    # initialize MSE tracking arrays
+    train_mse_nn = np.zeros(num_obs)
+    test_mse_nn = np.zeros(num_obs)
+    # train_mse_lr = np.zeros(len(obs_array))
+    test_mse_lr = np.zeros(num_obs)
+    # train_mse_ag = np.zeros(len(obs_array))
+    test_mse_ag = np.zeros(num_obs)
+
+    # Generate test data
+    x_test, y_test = gen_test_data(dim, num_test, reg_func)
+    pd_test = pd.DataFrame(x_test)
+    if verbose:
+        print("x_test:------------------------")
+        print("  Shape of x_test: " + str(x_test.shape))
+        print("  Avg of x_test: " + str(np.mean(x_test)))
+        print(x_test.T)
+        print("y_test:------------------------")
+        print("  Shape of y_test: " + str(y_test.shape))
+        print("  Avg of y_test: " + str(np.mean(y_test)))
+        print(y_test.T)
+
+    for index in range(len(sd_noise_arr)):
+        sd_noise = sd_noise_arr[index]
+        print("num_obs: " + str(num_obs) + "-------------------------------------------------------------------------")
+        for rep in range(reps):
+            print("rep: " + str(rep) + "-----------------------------------------------")
+            # Generate train data
+            x_train, y_train = gen_train_data(dim, num_obs, reg_func, sd_noise)
+            if verbose:
+                print("x_train: ")
+                print("  Shape of x_train: " + str(x_train.shape))
+                # print("  input_reg: " + str(input_reg))
+                print("  Avg of x_train: " + str(np.mean(x_train)))
+                print("y_train: ")
+                print("  Shape of y_train: " + str(y_train.shape))
+                # print("  obs: " + str(obs))
+                print("  Avg of y_train: " + str(np.mean(y_train)))
+
+            pd_train = pd.DataFrame(np.concatenate((x_train, y_train), axis=1))
+
+            # NN
+            print("NN------------------------------------------------------------------")
+            train_rep_mse, test_rep_mse = keras_model_test_train(x_train, y_train, x_test, y_test)
+            train_mse_nn[index] += train_rep_mse
+            test_mse_nn[index] += test_rep_mse
+
+            # Linear regression
+            print("Linear Regression------------------------------------------------------------------")
+            reg = LinearRegression().fit(x_train, y_train)
+            reg_pred = reg.predict(x_test)
+            test_mse_lr[index] += np.sum(np.power(y_test - reg_pred, 2)) / num_test
+            if verbose:
+                print("reg_pred: " + str(reg_pred.T))
+
+            # Autogluon
+            path = "agModels-predictClass"
+            train_data = TabularDataset(pd_train)
+            predictor = TabularPredictor(label=train_data.columns[len(train_data.columns) - 1], path=path).fit(
+                train_data)
+            ag_pred = predictor.predict(pd_test, as_pandas=False)
+            test_mse_ag[index] += np.sum(np.power(y_test - ag_pred, 2)) / num_test
+            if verbose:
+                print("ag_pred: " + str(ag_pred.T))
+
+        train_mse_nn[index] = train_mse_nn[index] / reps
+        test_mse_nn[index] = test_mse_nn[index] / reps
+        test_mse_lr[index] = test_mse_lr[index] / reps
+        test_mse_ag[index] = test_mse_ag[index] / reps
+        if verbose:
+            print("train_mse_nn (index = " + str(index) + "): " + str(train_mse_nn[index]))
+            print("test_mse_nn (index = " + str(index) + "): " + str(test_mse_nn[index]))
+            print("test_mse_lr (index = " + str(index) + "): " + str(test_mse_lr[index]))
+            print("test_mse_ag (index = " + str(index) + "): " + str(test_mse_ag[index]))
+
+    fig, ax = plt.subplots()
+    l1, = ax.plot(sd_noise_arr, test_mse_nn, 'b')
+    l2, = ax.plot(sd_noise_arr, test_mse_lr, 'r')
+    l3, = ax.plot(sd_noise_arr, test_mse_ag, 'k')
+    ax.set(xlabel='Number of Training Observations', ylabel='Test Set MSE',
+           title='Comparison of Regression Performance (Number of Training Observations: ' + str(num_obs) + ')')
+    ax.legend([l1, l2, l3], ['NN loss', 'Regression loss', "AG Loss"])
+    ax.grid()
+    plt.show()
+
 
 num_obs_arr = np.arange(100, 500, step=50)
 dim_prob = 1
@@ -231,4 +329,4 @@ dim_prob = 1
 
 partial_func = partial(data_gen.x_square, weights=np.ones(1), scale=1, intercept=0)
 func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
-main(dim_prob, num_obs_arr, 2, 50, func, 0.5, True)
+main_obs(dim_prob, num_obs_arr, 2, 50, func, 0.5, True)
