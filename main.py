@@ -1,14 +1,16 @@
 import data_generation as data_gen
-import nn_helpers
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import torch
 from autogluon.tabular import TabularDataset, TabularPredictor
 from functools import partial
 from sklearn.linear_model import LinearRegression
-from torch import nn
-from torch.utils.data import Dataset, DataLoader
+from tensorflow import keras
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.initializers import RandomUniform
+from tensorflow.keras.activations import relu
+from tensorflow.keras.optimizers import Adam
 
 
 class RegFunc:
@@ -31,78 +33,33 @@ class RegFunc:
         return self.func(input_vector)
 
 
-class NeuralNetwork(nn.Module):
-    """
-    A class that represents a feed-forward neural network
-
-    :param nn_layers: the number of layers in the network
-    """
-
-    def __init__(self, nn_layers):
-        super(NeuralNetwork, self).__init__()
-        self.linear_relu_stack = nn.Sequential(nn_layers)
-
-    def forward(self, x):
-        """
-        :param x: input vector
-        :return: feeds x through the network
-        """
-        output = self.linear_relu_stack(x)
-        return output
-
-
-class GenDataset(Dataset):
-    """
-    A class that represents a dataset. Used to train the network.
-    """
-
-    def __init__(self, reg_mat, obs):
-        self.reg_mat = reg_mat
-        self.obs = obs
-
-    def __len__(self):
-        return self.obs.size(dim=0)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-        return self.reg_mat[idx, :], self.obs[idx]
-
-
-def gen_train_data(dim, num_obs, reg_func, batch_size, verbose):
+def gen_train_data(dim, num_obs, reg_func, verbose):
     """
     :param dim: an integer, the dimension of the regression problem
     :param num_obs: an integer, the number of observations to generate for the training set
     :param reg_func: a RegFunc, the underlying regression function and its properties
-    :param batch_size: an integer, how many samples per batch to load
     :param verbose: a boolean, enables print statements
-    :return: A dataloader for the train data set and a dataloader for the test set
     """
 
     # Generate a matrix of random regressor vectors and corresponding observations
     input_reg = data_gen.generate_regressor_mat(dim, num_obs)
     obs = data_gen.generate_data(input_reg, reg_func.eval)
-    tens_obs = torch.tensor(obs, dtype=torch.float)
-    tens_input_reg = torch.tensor(input_reg.T, dtype=torch.float)
-    train_dataset = GenDataset(tens_input_reg, tens_obs)
     if verbose:
         print("input_reg: ")
-        print("  Shape of input_reg: " + str(train_dataset.reg_mat.size()))
-        # print("  input_reg: " + str(train_dataset.input_reg))
-        print("  Avg of input_reg: " + str(torch.mean(train_dataset.reg_mat)))
+        print("  Shape of input_reg: " + str(input_reg.size()))
+        # print("  input_reg: " + str(input_reg))
+        print("  Avg of input_reg: " + str(np.mean(input_reg)))
         print("obs: ")
-        print("  Shape of obs: " + str(train_dataset.obs.size()))
-        # print("  obs: " + str(train_dataset.obs))
-        print("  Avg of observations: " + str(torch.mean(train_dataset.obs)))
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    return train_dataloader, input_reg, obs
+        print("  Shape of obs: " + str(obs.size()))
+        # print("  obs: " + str(obs))
+        print("  Avg of observations: " + str(np.mean(obs)))
+    return input_reg, obs
 
 
-def gen_test_data(dim, reg_func, batch_size, num_test, verbose):
+def gen_test_data(dim, num_test, reg_func, verbose):
     """
     :param dim: an integer, the dimension of the regression problem
     :param reg_func: a RegFunc, the underlying regression function and its properties
-    :param batch_size: an integer, how many samples per batch to load
     :param num_test: an integer, the size of the training set
     :param verbose: a boolean, enables print statements
     :return: A dataloader for the train data set and a dataloader for the test set
@@ -114,169 +71,120 @@ def gen_test_data(dim, reg_func, batch_size, num_test, verbose):
     for i in range(num_test):
         true_obs[i] += reg_func.eval(test_reg[:, i])
     # Convert test data to torch tensor and Dataset
-    tens_test_reg = torch.from_numpy(test_reg.T).float()
-    tens_true_obs = torch.from_numpy(true_obs).float()
-    test_dataset = GenDataset(tens_test_reg, tens_true_obs)
     if verbose:
         print("test_reg: ")
-        print("  Shape of test_reg: " + str(test_dataset.reg_mat.size()))
+        print("  Shape of test_reg: " + str(test_reg.size()))
         # print("  test_reg: " + str(train_dataset.input_reg))
-        print("  Avg of test_reg: " + str(torch.mean(test_dataset.reg_mat)))
+        print("  Avg of test_reg: " + str(test_reg))
         print("true_obs: ")
-        print("  Shape of true_obs: " + str(test_dataset.obs.size()))
+        print("  Shape of true_obs: " + str(true_obs.size()))
         # print("  true_obs: " + str(train_dataset.obs))
-        print("  Avg of observations: " + str(torch.mean(test_dataset.obs)))
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
-    return test_dataloader, test_reg, true_obs
+        print("  Avg of observations: " + str(np.mean(true_obs)))
+    return test_reg, true_obs
 
 
-def create_network(dim, num_obs, reg_func, c_inv, verbose):
-    """
-    :param dim: an integer, the dimension of the regression problem
-    :param num_obs: an integer, the number of observations to generate for the training set
-    :param reg_func: a RegFunc, the underlying regression function and its properties
-    :param c_inv: a float, regulates the width of the network
-    :param verbose: boolean, should information be printed to console?
-    :return:
-    """
-    # Calculate the network parameters
-    min_F, min_layers, min_nodes, s = nn_helpers.network_parameters(reg_func.beta, reg_func.t, reg_func.K, num_obs, c_inv)
-    if verbose:
-        print("min_F: " + str(min_F))
-        print("min_layers: " + str(min_layers))
-        print("min_nodes: " + str(min_nodes))
-        print("s: " + str(s))
+def keras_model_test_train(x_train, y_train, x_test, y_test):
+    num_obs = x_test.size[0]
+    num_test = y_test.size[0]
+    max_while = 1
+    msemse = 50 * np.ones(max_while)
+    test_msemse = 50 * np.ones(max_while)
+    iter_num = 0
+    while iter_num < max_while:
+        print("iter_num: " + str(iter_num))
+        z = relu
+        # increasing Glorot initialization
+        wgt1 = RandomUniform(minval=0., maxval=1., seed=None)
+        wgt2 = RandomUniform(minval=-1., maxval=0., seed=None)
+        wgt3 = RandomUniform(minval=-np.sqrt(6.) / np.sqrt(10.), maxval=0., seed=None)
+        wgt4 = RandomUniform(minval=0., maxval=np.sqrt(6.) / np.sqrt(10.), seed=None)
 
-    # Create the network architecture
-    nn_layers = nn_helpers.create_network_graph(min_layers, min_nodes, dim, 1, False)
+        # Adam optimizer
+        opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, decay=0.00021)
+        # earlystop if MSE does not decrease
+        earlystop = keras.callbacks.EarlyStopping(monitor='loss', patience=400, min_delta=0.00000001, verbose=1,
+                                                  mode='auto')
+        callbacks = [earlystop]
 
-    # Get cpu or gpu device for training.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if verbose:
-        print("Using {} device".format(device))
+        # DNN
+        model = Sequential()
+        model.add(Dense(5, input_dim=1, kernel_initializer=wgt1, bias_initializer=wgt2, activation=z))
+        model.add(Dense(5, kernel_initializer=wgt4, bias_initializer=wgt3, activation=z))
+        model.add(Dense(5, kernel_initializer=wgt4, bias_initializer=wgt3, activation=z))
+        model.add(Dense(1, kernel_initializer=wgt1, activation='linear'))
+        model.compile(loss='mean_squared_error', optimizer=opt)
+        model.fit(x_train, y_train, epochs=1500, callbacks=callbacks, verbose=0)
+        predicted = model.predict(x_train)
+        msemse[iter_num] = sum((y_train - predicted) ** 2)
 
-    # Move neural network to device and print its structure
-    model = NeuralNetwork(nn_layers).to(device)
-    if verbose:
-        print(model)
-    return model
+        predicted_test = model.predict(x_test)
+        test_msemse[iter_num] = sum((y_test - predicted_test) ** 2)
+        print("x_test:------------------------")
+        print(x_test)
+        print("y_test:------------------------")
+        print(y_test)
+        print("predicted_test:------------------------")
+        print(predicted_test)
+        print("-----------------------------------------")
+        print("train mse: " + str(msemse[iter_num] / num_obs))
+        print("test mse: " + str(test_msemse[iter_num] / num_test))
+        plt.scatter(x_test, y_test, color='b')
+        plt.scatter(x_test, predicted_test, color='r')
+        plt.ylim((-0.1, 1.1))
+        plt.title('${DNN}$')
+        plt.show()
+        print("----------------------------------------- END OF ITER -----------------------------------------")
+        if msemse[iter_num] < 50:  # <0.000002 to reproduce simulations from paper
+            iter_num = max_while
+        iter_num = iter_num + 1
+    train_mse = min(msemse) / num_obs
+    print("Train MSE DNN: " + str(train_mse))
 
-
-def train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose):
-    """
-    :param model: a NeuralNetwork object, the model used
-    :param train_dataloader: a Dataloader, the training set
-    :param test_dataloader: a Dataloader, the testing set
-    :param num_epochs: an integer, the number of epochs to train for
-    :param learning_rate: a float, the learning rate of the model
-    :param weight_decay: a float, the weight decay parameter
-    :param verbose: a boolean, enables print statements
-    :return: the average test error
-    """
-
-    initial_params = torch.nn.utils.parameters_to_vector(model.parameters())
-    if verbose:
-        print("Initial network parameters: " + str(initial_params))
-
-    # Loss function to evaluate model performance
-    loss_func = nn.MSELoss()
-    # Optimizer to update network parameters
-    # optimizer_func = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    optimizer_func = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-
-    # Train the model on the generated data
-    model.train(True)
-    for t in range(num_epochs):
-        print(f"Epoch {t + 1}\n-------------------------------")
-        nn_helpers.train_loop(dataloader=train_dataloader, model=model, loss_fn=loss_func, optimizer=optimizer_func)
-    if verbose:
-        print("Final network params = initial params: " + str(initial_params == torch.nn.utils.parameters_to_vector(model.parameters())))
-        print("Final network parameters: " + str(torch.nn.utils.parameters_to_vector(model.parameters())))
-
-    # number of non-zero parameters:
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-    num_params = sum([np.prod(p.size()) for p in model_parameters])
-    num_non_zero_params = torch.count_nonzero(torch.nn.utils.parameters_to_vector(model.parameters()))
-    if verbose:
-        print("Number of parameters: " + str(num_params))
-        print("Number of non-zero parameters: " + str(num_non_zero_params))
-
-    # Evaluate model performance on test data
-    model.eval()
-    test_loss = nn_helpers.test_loop(test_dataloader, model, loss_func)
-    return test_loss
+    test_mse = min(test_msemse) / num_test
+    print("Test MSE DNN: " + str(test_mse))
+    return train_mse, test_mse
 
 
-def main(obs, reps, dim, reg_func, c_inv, batch_size, num_epochs, num_test, learning_rate, weight_decay, verbose):
-    """
-    :param obs: an numpy array of observations
-    :param reps: an integer, how many times to train/test at a given observation
-    :param dim: an integer, the dimension of the regression problem
-    :param reg_func: a RegFunc, the underlying regression function and its properties
-    :param c_inv: a float, regulates the width of the network
-    :param batch_size: an integer, how many samples per batch to load
-    :param num_epochs: an integer, how many training epochs to use
-    :param num_test: an integer, the size of the test set
-    :param learning_rate: a float, the learning rate
-    :param weight_decay: a float,  the weight decay regularization parameter
-    :param verbose: boolean, enables print statements
-    :return: none
-    """
+def main(dim, obs_array, num_test, reg_func, verbose):
+    # initialize MSE tracking arrays
+    train_mse_nn = np.zeros(len(obs_array))
+    test_mse_nn = np.zeros(num_test)
+    train_mse_lr = np.zeros(len(obs_array))
+    test_mse_lr = np.zeros(num_test)
+    train_mse_ag = np.zeros(len(obs_array))
+    test_mse_ag = np.zeros(num_test)
 
-    np.random.seed(2022)
-    tot_loss_nn = np.zeros(obs.size)
-    tot_loss_reg = np.zeros(obs.size)
-    tot_loss_ag = np.zeros(obs.size)
-    for index in range(obs.size):
-        num_obs = obs[index]
-        model = create_network(dim, num_obs, reg_func, c_inv, verbose)
-        for rep in range(reps):
-            train_dataloader, x_train, y_train = gen_train_data(dim, num_obs, reg_func, batch_size, verbose)
-            test_dataloader, x_test, y_test = gen_test_data(dim, reg_func, 1, num_test, verbose)
-            pd_train = pd.DataFrame(np.concatenate((x_train.T, y_train), axis=1))
-            #print(pd_train)
-            pd_test = pd.DataFrame(x_test.T)
+    for index in range(len(obs_array)):
+        # Generate data
+        num_obs = obs_array[index]
+        x_train, y_train = gen_train_data(dim, num_obs, reg_func, verbose)
+        x_test, y_test = gen_test_data(dim, num_test, reg_func, verbose)
+        pd_train = pd.DataFrame(np.concatenate((x_train.T, y_train), axis=1))
+        pd_test = pd.DataFrame(x_test.T)
 
-            # NN
-            tot_loss_nn[index] += train_test_net(model, train_dataloader, test_dataloader, num_epochs, learning_rate, weight_decay, verbose)
-
-            # regression
-            reg = LinearRegression().fit(x_train.T, y_train)
-            reg_pred = reg.predict(x_test.T)
-            if verbose:
-                print(reg.coef_)
-                print(reg.intercept_)
-            reg_loss = np.sum(np.power(y_test - reg_pred, 2)) / num_test
-            print("reg_loss: " + str(reg_loss))
-            tot_loss_reg[index] += reg_loss
-
-            # autogluon
-            path = "agModels-predictClass"
-            train_data = TabularDataset(pd_train)
-            predictor = TabularPredictor(label=train_data.columns[len(train_data.columns)-1], path=path).fit(train_data)
-            y_pred = predictor.predict(pd_test, as_pandas=False)
-            ag_loss = np.sum(np.power(y_test - y_pred, 2)) / num_test
-            print("ag_loss: " + str(ag_loss))
-            tot_loss_ag[index] += ag_loss
-
-        tot_loss_nn[index] = tot_loss_nn[index] / reps
-        tot_loss_reg[index] = tot_loss_reg[index] / reps
-        tot_loss_ag[index] = tot_loss_ag[index] / reps
+        # NN
+        train_mse_nn[index], test_mse_nn[index] = keras_model_test_train(x_train, y_train, x_test, y_test)
         if verbose:
-            print("--------------------------------------------------------------------------------------------------")
-    print("tot_loss_nn: " + str(tot_loss_nn))
-    print("tot_loss_reg: " + str(tot_loss_reg))
-    print("tot_loss_ag: " + str(tot_loss_ag))
+            print("train_mse_nn (index = " + str(index) + "): " + str(train_mse_nn[index]))
+            print("test_mse_nn (index = " + str(index) + "): " + str(test_mse_nn[index]))
 
-    # Plot the error across different sample sizes
-    fig, ax = plt.subplots()
-    l1, = ax.plot(obs, tot_loss_nn, 'b')
-    l2, = ax.plot(obs, tot_loss_reg, 'r')
-    l3, = ax.plot(obs, tot_loss_ag, 'k')
-    ax.set(xlabel='Number of Observations', ylabel='Total Loss', title='Convergence of NN function estimate')
-    ax.legend([l1, l2, l3], ['NN loss', 'Regression loss', "AG Loss"])
-    ax.grid()
-    plt.show()
+        # Linear regression
+        reg = LinearRegression().fit(x_train.T, y_train)
+        reg_pred = reg.predict(x_test.T)
+        test_mse_lr[index] = np.sum(np.power(y_test - reg_pred, 2)) / num_test
+        if verbose:
+            print("reg_pred: " + str(reg_pred))
+            print("test_mse_lr (index = " + str(index) + "): " + str(test_mse_lr[index]))
+
+        # Autogluon
+        path = "agModels-predictClass"
+        train_data = TabularDataset(pd_train)
+        predictor = TabularPredictor(label=train_data.columns[len(train_data.columns) - 1], path=path).fit(train_data)
+        ag_pred = predictor.predict(pd_test, as_pandas=False)
+        test_mse_ag[index] = np.sum(np.power(y_test - ag_pred, 2)) / num_test
+        if verbose:
+            print("ag_pred: " + str(ag_pred))
+            print("test_mse_ag (index = " + str(index) + "): " + str(test_mse_ag[index]))
 
 
 num_obs_arr = np.arange(300, 3000, step=300)
@@ -284,9 +192,10 @@ dim_prob = 2
 # partial_func = partial(data_gen.constant_func, constant=100)
 # partial_func = partial(data_gen.linear_func, weights=np.ones(dim_prob), intercept=10)
 # partial_func = partial(data_gen.linear_func, weights=np.full(dim_prob, [10, -20]), intercept=0)
-# partial_func = partial(data_gen.x_square, weights=np.full(dim_prob, [2, -20]), scale=1, intercept=0)
-partial_func = partial(data_gen.sinusoidal, weights=np.ones(dim_prob), amp=10, ang_freq=2, x_off=0, y_off=5)
-func = RegFunc(partial_func, beta=np.ones(dim_prob), t=np.ones(dim_prob), K=1)
-main(num_obs_arr, reps=2, dim=dim_prob, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0.0001, verbose=True)
+#partial_func = partial(data_gen.x_square, weights=np.full(dim_prob, [2, -20]), scale=1, intercept=0)
+#func = RegFunc(partial_func, beta=np.ones(dim_prob), t=np.ones(dim_prob), K=1)
+#main(num_obs_arr, reps=2, dim=dim_prob, reg_func=func, c_inv=10, batch_size=5, num_epochs=10, num_test=20, learning_rate=0.001, weight_decay=0.0001, verbose=True)
 
 
+partial_func = partial(data_gen.x_square, weights=np.ones(1), scale=1, intercept=0)
+func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
