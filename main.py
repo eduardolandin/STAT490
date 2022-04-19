@@ -68,6 +68,7 @@ def gen_test_data(dim, num_test, reg_func):
 def keras_model_test_train(x_train, y_train):
     num_obs = y_train.shape[0]
     max_while = 3
+    min_se = -1
     msemse = 50 * np.ones(max_while)
     iter_num = 0
 
@@ -88,9 +89,9 @@ def keras_model_test_train(x_train, y_train):
     callbacks = [earlystop]
 
     # DNN
-    model = Sequential()
+    cached_model = Sequential()
     while iter_num < max_while:
-        print("iter_num: " + str(iter_num))
+        print("    NN training iter_num: " + str(iter_num) + "-------------------------")
 
         model = Sequential()
         model.add(Dense(5, input_dim=1, kernel_initializer=wgt1, bias_initializer=wgt2, activation=activ_func))
@@ -102,14 +103,18 @@ def keras_model_test_train(x_train, y_train):
         predicted = model.predict(x_train)
         msemse[iter_num] = sum((y_train - predicted) ** 2)
 
-        print("train mse: " + str(msemse[iter_num] / num_obs))
+        print("    train mse: " + str(msemse[iter_num] / num_obs))
+        if (msemse[iter_num] < min_se) or (min_se == -1):
+            min_se = msemse[iter_num]
+            cached_model = model
+
         if msemse[iter_num] < 10:  # <0.000002 to reproduce simulations from paper
             iter_num = max_while
         iter_num = iter_num + 1
-        print("----------------------------------------- END OF ITER -----------------------------------------")
+
     train_mse = min(msemse) / num_obs
-    print("Train MSE DNN: " + str(train_mse))
-    return model
+    print("Final Train MSE DNN: " + str(train_mse))
+    return cached_model
 
 
 def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
@@ -128,11 +133,8 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
     """
 
     # initialize MSE tracking arrays
-    train_mse_nn = np.zeros(obs_array.size)
     test_mse_nn = np.zeros(obs_array.size)
-    # train_mse_lr = np.zeros(len(obs_array))
     test_mse_lr = np.zeros(obs_array.size)
-    # train_mse_ag = np.zeros(len(obs_array))
     test_mse_ag = np.zeros(obs_array.size)
 
     # Generate test data
@@ -150,7 +152,7 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
 
     for index in range(len(obs_array)):
         num_obs = obs_array[index]
-        print("num_obs: " + str(num_obs) + "-------------------------------------------------------------------------")
+        print("num_obs: " + str(num_obs) + "*************************************************************************")
         for rep in range(reps):
             print("rep: " + str(rep) + "-----------------------------------------------")
             # Generate train data
@@ -158,11 +160,11 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
             if verbose:
                 print("x_train: ")
                 print("  Shape of x_train: " + str(x_train.shape))
-                # print("  input_reg: " + str(input_reg))
+                #print("  x_Train: " + str(x_train.T))
                 print("  Avg of x_train: " + str(np.mean(x_train)))
                 print("y_train: ")
                 print("  Shape of y_train: " + str(y_train.shape))
-                # print("  obs: " + str(obs))
+                #print("  y_train: " + str(y_train.T))
                 print("  Avg of y_train: " + str(np.mean(y_train)))
 
             pd_train = pd.DataFrame(np.concatenate((x_train, y_train), axis=1))
@@ -172,12 +174,11 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
             nn_model = keras_model_test_train(x_train, y_train)
             nn_predicted = nn_model.predict(x_test)
             if verbose:
-                print("nn_predicted: " + str(nn_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, nn_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${DNN}$')
-                plt.show()
+                #print("nn_predicted: " + str(nn_predicted.T))
+                #plt.scatter(x_test, y_test, color='b')
+                #plt.scatter(x_test, nn_predicted, color='r')
+                #plt.title('${DNN}$')
+                #plt.show()
             test_mse_nn[index] += (np.sum(np.power(y_test - nn_predicted, 2)) / num_test)
 
             # Linear regression
@@ -185,34 +186,32 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
             reg = LinearRegression().fit(x_train, y_train)
             reg_predicted = reg.predict(x_test)
             test_mse_lr[index] += (np.sum(np.power(y_test - reg_predicted, 2)) / num_test)
+            print(np.power(y_test - reg_predicted, 2).shape)
             if verbose:
-                print("reg_predidcted: " + str(reg_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, reg_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${Linear Regression}$')
-                plt.show()
+                print("reg_predicted: " + str(reg_predicted.T))
+                #plt.scatter(x_test, y_test, color='b')
+                #plt.scatter(x_test, reg_predicted, color='r')
+                #plt.title('${Linear Regression}$')
+                #plt.show()
 
             # Autogluon
+            print("AutoGluon--------------------------------------------------------------------------")
             path = "agModels-predictClass"
             train_data = TabularDataset(pd_train)
             predictor = TabularPredictor(label=train_data.columns[len(train_data.columns) - 1], path=path).fit(train_data)
-            ag_predicted = predictor.predict(pd_test, as_pandas=False)
+            ag_predicted = np.reshape(predictor.predict(pd_test, as_pandas=False), y_test.shape)
             test_mse_ag[index] += (np.sum(np.power(y_test - ag_predicted, 2)) / num_test)
             if verbose:
                 print("ag_pred: " + str(ag_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, reg_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${AutoGluon}$')
-                plt.show()
+                #plt.scatter(x_test, y_test, color='b')
+                #plt.scatter(x_test, ag_predicted, color='r')
+                #plt.title('${AutoGluon}$')
+                #plt.show()
 
-        train_mse_nn[index] = train_mse_nn[index] / reps
         test_mse_nn[index] = test_mse_nn[index] / reps
         test_mse_lr[index] = test_mse_lr[index] / reps
         test_mse_ag[index] = test_mse_ag[index] / reps
         if verbose:
-            print("train_mse_nn (index = " + str(index) + "): " + str(train_mse_nn[index]))
             print("test_mse_nn (index = " + str(index) + "): " + str(test_mse_nn[index]))
             print("test_mse_lr (index = " + str(index) + "): " + str(test_mse_lr[index]))
             print("test_mse_ag (index = " + str(index) + "): " + str(test_mse_ag[index]))
@@ -233,7 +232,7 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
     Plots the results.
 
     :param dim: an int, the dimension of the regression problemx
-    :param obs: an int, the number of observations to use in the training set
+    :param num_obs: an int, the number of observations to use in the training set
     :param reps: an int, how many reps per each number of observation
     :param num_test: an int, the size of the testing set
     :param reg_func: a RegFunc object, the underlying regression function
@@ -243,12 +242,9 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
     """
 
     # initialize MSE tracking arrays
-    train_mse_nn = np.zeros(num_obs)
-    test_mse_nn = np.zeros(num_obs)
-    # train_mse_lr = np.zeros(len(obs_array))
-    test_mse_lr = np.zeros(num_obs)
-    # train_mse_ag = np.zeros(len(obs_array))
-    test_mse_ag = np.zeros(num_obs)
+    test_mse_nn = np.zeros(sd_noise_arr.size)
+    test_mse_lr = np.zeros(sd_noise_arr.size)
+    test_mse_ag = np.zeros(sd_noise_arr.size)
 
     # Generate test data
     x_test, y_test = gen_test_data(dim, num_test, reg_func)
@@ -273,11 +269,11 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
             if verbose:
                 print("x_train: ")
                 print("  Shape of x_train: " + str(x_train.shape))
-                # print("  input_reg: " + str(input_reg))
+                # print("  x_train: " + str(input_reg))
                 print("  Avg of x_train: " + str(np.mean(x_train)))
                 print("y_train: ")
                 print("  Shape of y_train: " + str(y_train.shape))
-                # print("  obs: " + str(obs))
+                # print("  y_train: " + str(obs))
                 print("  Avg of y_train: " + str(np.mean(y_train)))
 
             pd_train = pd.DataFrame(np.concatenate((x_train, y_train), axis=1))
@@ -288,11 +284,10 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
             nn_predicted = nn_model.predict(x_test)
             if verbose:
                 print("nn_predicted: " + str(nn_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, nn_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${DNN}$')
-                plt.show()
+                #plt.scatter(x_test, y_test, color='b')
+                #plt.scatter(x_test, nn_predicted, color='r')
+                #plt.title('${DNN}$')
+                #plt.show()
             test_mse_nn[index] += (np.sum(np.power(y_test - nn_predicted, 2)) / num_test)
 
             # Linear regression
@@ -302,33 +297,30 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
             test_mse_lr[index] += (np.sum(np.power(y_test - reg_predicted, 2)) / num_test)
             if verbose:
                 print("reg_predicted: " + str(reg_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, reg_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${Linear Regression}$')
-                plt.show()
+                #plt.scatter(x_test, y_test, color='b')
+                #plt.scatter(x_test, reg_predicted, color='r')
+                #plt.title('${Linear Regression}$')
+                #plt.show()
 
             # Autogluon
+            print("AutoGluon--------------------------------------------------------------------------")
             path = "agModels-predictClass"
             train_data = TabularDataset(pd_train)
             predictor = TabularPredictor(label=train_data.columns[len(train_data.columns) - 1], path=path).fit(
                 train_data)
-            ag_predicted = predictor.predict(pd_test, as_pandas=False)
+            ag_predicted = np.reshape(predictor.predict(pd_test, as_pandas=False), y_test.shape)
             test_mse_ag[index] += (np.sum(np.power(y_test - ag_predicted, 2)) / num_test)
             if verbose:
-                print("ag_predicted: " + str(ag_predicted.T))
-                plt.scatter(x_test, y_test, color='b')
-                plt.scatter(x_test, reg_predicted, color='r')
-                plt.ylim((-0.1, 1.1))
-                plt.title('${AutoGluon}$')
-                plt.show()
+                print("ag_pred: " + str(ag_predicted.T))
+                # plt.scatter(x_test, y_test, color='b')
+                # plt.scatter(x_test, ag_predicted, color='r')
+                # plt.title('${AutoGluon}$')
+                # plt.show()
 
-        train_mse_nn[index] = train_mse_nn[index] / reps
         test_mse_nn[index] = test_mse_nn[index] / reps
         test_mse_lr[index] = test_mse_lr[index] / reps
         test_mse_ag[index] = test_mse_ag[index] / reps
         if verbose:
-            print("train_mse_nn (index = " + str(index) + "): " + str(train_mse_nn[index]))
             print("test_mse_nn (index = " + str(index) + "): " + str(test_mse_nn[index]))
             print("test_mse_lr (index = " + str(index) + "): " + str(test_mse_lr[index]))
             print("test_mse_ag (index = " + str(index) + "): " + str(test_mse_ag[index]))
@@ -337,7 +329,7 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
     l1, = ax.plot(sd_noise_arr, test_mse_nn, 'b')
     l2, = ax.plot(sd_noise_arr, test_mse_lr, 'r')
     l3, = ax.plot(sd_noise_arr, test_mse_ag, 'k')
-    ax.set(xlabel='Number of Training Observations', ylabel='Test Set MSE',
+    ax.set(xlabel='SD of Error Term', ylabel='Test Set MSE',
            title='Comparison of Regression Performance (# Training Obs: ' + str(num_obs) + ', # Testing Obs: ' + str(num_test) + ')')
     ax.legend([l1, l2, l3], ['NN loss', 'Regression loss', "AG Loss"])
     ax.grid()
@@ -350,10 +342,16 @@ def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
 # partial_func = partial(data_gen.x_square, weights=np.full(dim_prob, [2, -20]), scale=1, intercept=0)
 # func = RegFunc(partial_func, beta=np.ones(dim_prob), t=np.ones(dim_prob), K=1)
 
-num_obs_arr = np.arange(100, 500, step=50)
+num_obs_arr = np.arange(200, 2000, step=200)
 dim_prob = 1
 partial_func = partial(data_gen.x_square, weights=np.ones(1), scale=1, intercept=0)
 func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
-main_obs(dim_prob, num_obs_arr, 2, 50, func, 0.5, True)
+main_obs(dim_prob, num_obs_arr, 1, 50, func, 0.5, True)
+
+noise_arr = np.arange(0.1, 5.0, step=0.5)
+dim_prob = 1
+partial_func = partial(data_gen.x_square, weights=np.ones(1), scale=1, intercept=0)
+func = RegFunc(partial_func, beta=np.ones(1), t=np.ones(1), K=1)
+#main_noise(dim_prob, 300, 1, 50, func, noise_arr, True)
 
 
