@@ -119,7 +119,7 @@ def keras_model_test_train(x_train, y_train):
 
 def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
     """
-    Runs the NN vs. the world experiments at different number of observations.
+    Runs the NN vs. other experiments at different number of observations.
     Plots the results.
 
     :param dim: an int, the dimension of the regression problemx
@@ -174,7 +174,7 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
             nn_model = keras_model_test_train(x_train, y_train)
             nn_predicted = nn_model.predict(x_test)
             if verbose:
-                #print("nn_predicted: " + str(nn_predicted.T))
+                print("nn_predicted: " + str(nn_predicted.T))
                 #plt.scatter(x_test, y_test, color='b')
                 #plt.scatter(x_test, nn_predicted, color='r')
                 #plt.title('${DNN}$')
@@ -228,7 +228,7 @@ def main_obs(dim, obs_array, reps, num_test, reg_func, sd_noise, verbose):
 
 def main_noise(dim, num_obs, reps, num_test, reg_func, sd_noise_arr, verbose):
     """
-    Runs the NN vs. the world experiments at different SDs for the noise term in the model.
+    Runs the NN vs. other experiments at different SDs for the noise term in the model.
     Plots the results.
 
     :param dim: an int, the dimension of the regression problemx
