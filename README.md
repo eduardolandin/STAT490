@@ -13,14 +13,11 @@ The goal of this project is to compare the empirical convergence rates of neural
   - Trained using Adam optimizer
   - Weights initialized using Glorot initialization   
 
-## Points of comparison
+## Points of comparison and procedure
 
-- Performance across different types of function
-- Performance across different input sizes
-- Performance across different signal to noise ratios
-
-## Procedure
-
+- Performance across different functions. The methods above were tested on constant, linear, quadratic and sinusoidal functions. These functions are implemented in `data_generation.py`. The testing set accuracy of the resulting models was then used to evaluate the methods' performance for each of the functions.
+- Performance across different training set sizes. Training sets of different sizes were generated. For each training set, a linear regression model, a tabular predictor model and a neural network model were fit. The testing set accuracy of the resulting models was then used to evaluate the methods' performance at each of the training set sizes.
+- Performance across different signal to noise ratios. Firstly, training sets (of the same size) were generated. A random noise term was added to each observation in the training set. The variance of this noise term was changed from training set to training set. This allowed us to give each training set a different signal-to-noise ratio. Each of the methods mentioned above was used to fit a model using the aforementioned training sets. The testing set accuracy of the resulting models was then used to evaluate the methods' performance at different signal to noise ratios.
 
 ## Code Overview
 
